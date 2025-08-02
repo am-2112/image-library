@@ -16,10 +16,12 @@ namespace ImageLibrary {
 
 	};
 
-	/* Specifies whether to receive interlaced and/or animated images */
 	struct ImageOptions {
+		/* Specifies whether to receive interlaced and/or animated images (read-only streams) */
 		bool receiveInterlaced;
 		bool receiveAnimation;
+
+
 	};
 
 	struct ImageReturnInfo {
