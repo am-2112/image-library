@@ -8,27 +8,28 @@ namespace ImageLibrary {
 	
 	/* Mapped to values such that: 
 	First 5 bits represent color channels: Grey | Red | Green | Blue | Alpha
-	Next bits represent number of bits per channel: 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128
+	Next 8 bits represent number of bits per channel: 128 | 64 | 32 | 16 | 8 | 4 | 2 | 1
 	Any other format will be converted to this style before returning to the user
 	The order of color channels will also be converted to follow the ordering of the bits above (Grey, RGBA in that order)
 	*/
 	enum class FormatDetails : unsigned short {
-		Gray1 = 0b100001,
-		Gray2 = 0b1000001,
-		Gray4 = 0b10000001,
-		Gray8 = 0b100000001,
-		Gray16 = 0b1000000001,
-		GrayAlpha8 = 0b100010001,
-		GrayAlpha16 = 0b1000100001,
-		RGB8 = 0b011100001,
-		RGB16 = 0b0111000001,
-		RGBA8 = 0b011110001,
-		RGBA16 = 0b0111100011,
+		Any = 0,
+		Gray1 = 0b1000000000001,
+		Gray2 = 0b1000000000010,
+		Gray4 = 0b1000000000100,
+		Gray8 = 0b1000000001000,
+		Gray16 = 0b1000000010000,
+		GrayAlpha8 = 0b1000100001000,
+		GrayAlpha16 = 0b1000100010000,
+		RGB8 = 0b0111000001000,
+		RGB16 = 0b0111000010000,
+		RGBA8 = 0b0111100001000,
+		RGBA16 = 0b0111100010000,
 	};
 
 	struct ImageFormat {
-		unsigned short bitsPerPixel;
-		FormatDetails formatting;
+		unsigned short bitsPerPixel = 0;
+		FormatDetails formatting = FormatDetails::Any;
 	};	
 
 	struct ImageData {
@@ -38,11 +39,12 @@ namespace ImageLibrary {
 		ImageFormat format;
 	};
 
+	/* Add optional ImageFormat target later (once the functionality has been added) */
 	struct ImageOptions {
 		/* Specifies whether to receive interlaced and/or animated images (read-only streams) */
 		bool receiveInterlaced;
 		bool receiveAnimation;
-		ImageFormat target;
+		//ImageFormat target;
 
 	};
 

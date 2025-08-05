@@ -1,4 +1,7 @@
 #include "png.h"
+#include <bit>
+#include <xmmintrin.h>
+#include <immintrin.h>
 
 using namespace Generic;
 using namespace std;
@@ -110,6 +113,7 @@ namespace ImageLibrary {
 		void PNGStream<Backing, Mode::Read>::ProcessChunk() {
 			if (currentChunk.type != ChunkType::IHDR && !chunkHistory.contains(ChunkType::IHDR)) { throw std::exception("IHDR not first chunk!"); } //IHDR always first
 			if (chunkHistory.contains(ChunkType::IEND)) { throw std::exception("IEND should be last!"); } //IEND should always be last
+			if (!firstIDAT && currentChunk.type == ChunkType::IDAT && prevChunk.type != ChunkType::IDAT) { throw exception("IDAT chunks should be next to each other"); }
 
 			bool isCritical = ((unsigned int)currentChunk.type << 5) & 0x1; //if first letter uppercase, chunk is critical (5th bit)
 			if (isCritical) {
@@ -134,7 +138,12 @@ namespace ImageLibrary {
 				PLTEGetPalette();
 				break;
 			case ChunkType::IDAT:
-				BeginReadIDAT();
+				if (firstIDAT) {
+					BeginReadIDAT();
+				}
+				else {
+					GetNextIDAT(); /* Shouldn't be called again through this, just a failsafe */
+				}
 				break;
 			case ChunkType::IEND:
 				state.next = NextAction::Finished;
@@ -161,9 +170,10 @@ namespace ImageLibrary {
 					throw std::exception("Invalid Format Settings");
 				}
 				else {
+					if (bpc < 8) { bpc = 8; } //even if bpc 1, will widen to 8 (ie. 1 byte) in the stream
 					out->format = {
 						.bitsPerPixel = bpc,
-						.formatting = (FormatDetails)(0b1 | (unsigned short)bpc >> 5)
+						.formatting = (FormatDetails)(0b1 << 12 | (unsigned short)bpc)
 					};
 				}
 				break;
@@ -174,7 +184,7 @@ namespace ImageLibrary {
 				else {
 					out->format = {
 						.bitsPerPixel = bpc * 3u,
-						.formatting = (FormatDetails)(0b0111 | (unsigned short)bpc >> 5)
+						.formatting = (FormatDetails)(0b0111 << 9 | (unsigned short)bpc)
 					};
 				}
 				break;
@@ -196,7 +206,7 @@ namespace ImageLibrary {
 				else {
 					out->format = {
 						.bitsPerPixel = bpc * 2u,
-						.formatting = (FormatDetails)(0b10001 | (unsigned short)bpc >> 5)
+						.formatting = (FormatDetails)(0b10001 << 8 | (unsigned short)bpc)
 					};
 				}
 				break;
@@ -207,7 +217,7 @@ namespace ImageLibrary {
 				else {
 					out->format = {
 						.bitsPerPixel = bpc * 4u,
-						.formatting = (FormatDetails)(0b01111 | (unsigned short)bpc >> 5)
+						.formatting = (FormatDetails)(0b01111 << 8 | (unsigned short)bpc)
 					};
 				}
 				break;
@@ -248,25 +258,43 @@ namespace ImageLibrary {
 		void PNGStream<Backing, Mode::Read>::BeginReadIDAT() {
 			_remaining_length = currentChunk.length;
 			UpdateCurrentBuffer();
-			/*if (!zlib_started) {
-				deflate = ZLIBStream<Backing, Generic::Mode::Read>(this);
-			}*/
+		}
+
+		template<typename Backing>
+		void PNGStream<Backing, Mode::Read>::GetNextIDAT() {
+			ReadChunkHeaders();
+			if (currentChunk.type == ChunkType::IDAT) {
+				_remaining_length = currentChunk.length;
+			}
+			else {
+				ProcessChunk();
+			}
 		}
 
 		//as soon as _remaining_length == 0, can CheckCRC early to avoid further processing if invalid crc computed
+		/* This will loop through as many chunks as needed to fill _current, or run out of chunks (ie. _remaining_length stays at 0) */
 		template<typename Backing>
 		void PNGStream<Backing, Mode::Read>::UpdateCurrentBuffer() {
 			_pointer = 0;
-			if (_remaining_length > buffer_size) {
-				_max = buffer_size;
-				BaseRead(_current, buffer_size, true);
-				_remaining_length -= buffer_size;
-			}
-			else {
-				_max = _remaining_length;
-				BaseRead(_current, _remaining_length, true);
-				_remaining_length = 0;
-			}
+			_max = 0;
+			do {
+				if (_remaining_length == 0) {
+					GetNextIDAT();
+				}
+
+				unsigned int amount = _remaining_length;
+				if (_remaining_length > buffer_size)
+					amount = buffer_size;
+
+				if (_remaining_length != 0) {
+					BaseRead(_current + _max, amount, true);
+					_max += amount;
+					_remaining_length -= amount;
+				}
+				else {
+					break; /* No IDAT chunks left (remaining length wasn't updated after running loop) */
+				}
+			} while (_max != buffer_size);
 		}
 
 		/* Will also set _last_read_count for how much data it was able to read from _current (including after buffer updates) */
@@ -301,13 +329,14 @@ namespace ImageLibrary {
 			while (_pointer + remaining > _max) { /* While loop in case of large seeks requiring multiple buffer updates (shouldn't ever happen though) */
 				if (_max == buffer_size) {
 					remaining -= (_max - _pointer);
+					_pointer = 0;
 					UpdateCurrentBuffer();
 				}
 				else {
 					throw std::exception("Reached end of stream!");
 				}
 			}
-			_pointer = (_pointer + amount) % buffer_size;
+			_pointer = (_pointer + remaining) % buffer_size;
 		}
 
 		template<typename Backing>
@@ -315,16 +344,277 @@ namespace ImageLibrary {
 			return _last_read_count;
 		}
 
-		//may need additional template parameters for intrinsics (like in other program implementation)
+		/* Largest format is 128bpp so accounting for overflow, need to use mm256i vector operations and then shorten back to mm128i 
+		If options set to receive interlaced images, will break early by throwing exception to return pass
+		If not interlaced, ignores the pass given in and will just loop for width & height given in out
+		*/
+		template<typename Backing>
+		template<typename Pixel> void PNGStream<Backing, Generic::Read>::FilterPass() {
+			unsigned int width;
+			unsigned int height;
+			Pixel* target = (Pixel*)out->image.data();
+
+			/* Do loop runs once per interlace pass (or only once for non-interlaced) */
+			do {
+
+				width = out->width;
+				height = out->height;
+
+				if (width == 0) { /* Empty interlace pass */
+					passes[interlacePass] = passes[interlacePass - 1];
+
+					/* Set output to this if receiving interlaced stuff, but don't explicitly return (only return right at end, or when new non-empty pass) */
+					if ((interlaced && opt->receiveInterlaced) || (interlaced && interlacePass == 6)) {
+						out->width = passes[interlacePass].width;
+						out->height = passes[interlacePass].height;
+						out->image = passes[interlacePass].image;
+					}
+
+					continue;
+				}
+
+				unsigned int rowIncrement = 1;
+				unsigned int colIncrement = 1;
+
+				unsigned int totalPixels = width * height;
+				unsigned int currentPixelI = 1; /* 1-indexed here */
+				unsigned int currentRow = 0;
+				if (interlaced) {
+					width = passes[interlacePass].width;
+					height = passes[interlacePass].height;
+					target = (Pixel*)passes[interlacePass].image.data();
+
+					/* Put pixels from previous pass into correct place in this image's pass & prepare new pass indexing */
+					if (interlacePass > 0) {
+						Pixel* prevPass = (Pixel*)passes[interlacePass - 1].image.data();
+
+						if (interlacePass == 1 || interlacePass == 3 || interlacePass == 5) {
+							/* These passes insert columns */
+							colIncrement = 2;
+							currentPixelI = 2; //new data on odd col
+
+							unsigned int prevIndex = 0;
+							for (unsigned int cRow = 0; cRow < height; cRow++) {
+								for (unsigned int cCol = 0; cCol < width; cCol+= 2) { /* original data on even col */		
+									target[(cRow * width) + cCol] = prevPass[prevIndex++];
+								}
+							}
+
+						}
+						else {
+							/* These passes insert rows */
+							rowIncrement = 2;
+							currentRow = 1; //new data on odd rows
+
+							unsigned int prevIndex = 0;
+							for (unsigned int cRow = 0; cRow < height; cRow+= 2) { /* original data on even row */
+								for (unsigned int cCol = 0; cCol < width; cCol ++) {
+									target[(cRow * width) + cCol] = prevPass[prevIndex++];
+								}
+							}
+						}
+					}
+				}
+
+				std::vector<uint8_t> prevRow(sizeof(__m128i) * (width + 1)); /* +1, since will index (currentPixelI - 1) for upper left */
+				Pixel* prevRowPixels = (Pixel*)prevRow.data();
+				__m128i* prevRowView = (__m128i*)prevRow.data();
+
+				std::vector<uint8_t> prev(sizeof(__m128i));
+				Pixel* prevPixel = (Pixel*)prev.data();
+				__m128i* prevPixelView = (__m128i*)prev.data();
+
+				std::vector<uint8_t> current(sizeof(__m128i));
+				Pixel* currentPixel = (Pixel*)current.data();
+				__m128i* currentPixelView = (__m128i*)current.data();
+
+				unsigned int readAmount = sizeof(uint8_t); /* Set to read filter byte */
+				bool newColumn = true;
+				while (deflate.TryRead(current.data(), readAmount)) {
+					totalPixels--;
+					readAmount = sizeof(Pixel);
+
+					if (newColumn) {
+						currentFilter = (PNG_Filter)current[0];
+						if (!deflate.TryRead(current.data(), readAmount)) {
+							throw exception("No data for new scanline");
+						}
+					}
+
+					switch (currentFilter) {
+					case PNG_Filter::Filter_None:
+						break;
+					case PNG_Filter::Filter_Sub:
+
+						break;
+					case PNG_Filter::Filter_Up:
+						/* remember upper left using -rowIncrement */
+
+						break;
+					case PNG_Filter::Filter_Paeth:
+						/* remember upper left using -rowIncrement */
+
+						break;
+					}
+
+					/* Write pixel to output */
+					target[(currentRow * width) + currentPixelI] = *currentPixel;
+
+					/* Set prevRow (upper left), prevPixel */
+					*prevRowView = *prevPixelView;
+					prevRowView += rowIncrement;
+
+					*prevPixelView = *currentPixelView;
+
+					currentPixelI += colIncrement;
+
+					if (currentPixelI > width) {
+						currentPixelI = 1;
+						currentRow += rowIncrement;
+						newColumn = true;
+						readAmount = sizeof(uint8_t); /* Set to read filter byte next iteration */
+						prevRowView = (__m128i*)prevRow.data();
+
+						memset(&prev, 0, sizeof(__m128i));
+					}
+				}
+
+				if (totalPixels != 0) {
+					throw exception("Not enough image data!");
+				}
+
+				/* Then, set the ImageData image to the current pass (if receiveInterlaced; otherwise, only do this for the last pass (pass 7)) */
+				if ((interlaced && opt->receiveInterlaced) || (interlaced && interlacePass == 6)) {
+					out->width = passes[interlacePass].width;
+					out->height = passes[interlacePass].height;
+					out->image = passes[interlacePass].image;
+					throw ReturnInterlacedPass();
+				}
+
+				interlacePass++;
+			} while (interlacePass < 7);
+		}
+
+		/* This should only be called once, after the first IDAT chunk header has been parsed */
 		template<typename Backing>
 		void PNGStream<Backing, Mode::Read>::GetUnfilteredData() {
-			while (deflate.TryRead(nullptr, 0)) {
+			state.next = NextAction::Read_Chunks;
+
+			unsigned int width = out->width;
+			unsigned int height = out->height;
+			if (interlaced && iPreProcessed) {
+				/* Give correct width & height and resize image vector, for each interlace pass (including setting = 0 for empty passes)
+				*/
+				iPreProcessed = false;
+
+				if (width < 5) {
+					passes[1].width = 0;
+					if (width < 3) {
+						passes[3].width = 0;
+						if (width < 2) {
+							passes[5].width = 0;
+						}
+					}
+				}
+				if (height < 5) {
+					passes[2].width = 0;
+					if (height < 3) {
+						passes[4].width = 0;
+						if (height < 2) {
+							passes[6].width = 0;
+						}
+					}
+				}
+
+				/* Calculate width & height for non-empty passes */
+				unsigned int runningWidth = 0;
+				unsigned int runningHeight = 0;
+				for (int pass = 0; pass < 7; pass++) {
+					/* Get reduced count */
+					unsigned int storeWidth = width;
+					unsigned int storeHeight = height;
+
+					if (passes[pass].width == 0) {
+						continue;
+					}
+
+					switch (pass) {
+					case 0:
+						passes[pass].width = (storeWidth + 7) / 8; /* ceil */
+						passes[pass].height = (storeHeight + 7) / 8;
+						break;
+					case 1:
+						storeWidth -= 4; //offset
+						passes[pass].width = (storeWidth + 7) / 8;
+						passes[pass].height = (storeHeight + 7) / 8;
+						break;
+					case 2:
+						storeHeight -= 4;
+						passes[pass].width = (storeWidth + 1) / 2;
+						passes[pass].height = (storeHeight + 7) / 8;
+						break;
+					case 3:
+						storeWidth -= 2;
+						passes[pass].width = (storeWidth +3) / 4;
+						passes[pass].height = (storeHeight +3) / 4;
+						break;
+					case 4:
+						storeHeight -= 2;
+						passes[pass].width = (storeWidth + 1) / 2;
+						passes[pass].height = (storeHeight + 3) / 4;
+						break;
+					case 5:
+						storeWidth -= 1;
+						passes[pass].width = (storeWidth + 1) / 2;
+						passes[pass].height = (storeHeight + 1) / 2;
+						break;
+					case 6:
+						storeHeight -= 1;
+						passes[pass].width = storeWidth;
+						passes[pass].height = (storeHeight + 1) / 2;
+						break;
+					}
+
+					/* Add to Running total */
+					if (pass > 0) {
+						passes[pass].width += runningWidth;
+						passes[pass].height += runningHeight;
+
+						runningWidth = passes[pass].width;
+						runningHeight = passes[pass].height;
+					} 
+				}
+			}
+
+			unsigned short bytesPerPixel = out->format.bitsPerPixel / 8;
+			switch (bytesPerPixel) {
+			case 1:
+				FilterPass<uint8_t>();
+				break;
+			case 2:
+				FilterPass<uint16_t>();
+				break;
+			case 4:
+				FilterPass<uint32_t>();
+				break;
+			case 8:
+				FilterPass<uint64_t>();
+				break;
+			case 16:
+				FilterPass<__m128i>();
+				break;
+			}
+
+
+			/* while (deflate.TryRead(nullptr, 0)) {
 				//defilter data and put it into return image buffer
 				Filter();
 				ConvertFormat();
-			}
+			}*/
 			state.next = NextAction::Finished;
 		}
+
+
 
 		template<typename Backing>
 		void PNGStream<Backing, Mode::Read>::ProcessAncillaryChunk() {
@@ -335,15 +625,6 @@ namespace ImageLibrary {
 		}
 
 
-		template<typename Backing>
-		void PNGStream<Backing, Mode::Read>::Filter() {
-
-		}
-
-		template<typename Backing>
-		void PNGStream<Backing, Mode::Read>::ConvertFormat() {
-
-		}
 
 		template<typename Backing>
 		void PNGStream<Backing, Mode::Read>::FlagCurrentChunk(ChunkFlag& toChange) {
@@ -441,6 +722,8 @@ namespace ImageLibrary {
 		PNGStreamState PNGStream<Backing, Mode::Read>::ExtQueryState() {
 			return state;
 		}
+
+
 
 		/* Explicit template instantiations */
 		template class PNGStream<vector<uint8_t>, Mode::Read>;

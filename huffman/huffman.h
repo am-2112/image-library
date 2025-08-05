@@ -40,7 +40,7 @@ namespace Generic {
 				/* Put symbols in table - sorted by length, by symbol order within each length */
 				for (symbol = 0; symbol < codeLengthsSize; symbol++) {
 					if (codeLengths[symbol] != 0) { //ignore symbols of 0 count
-						this.symbol[offs[codeLengths[symbol]]++] = symbol;
+						this->symbol[offs[codeLengths[symbol]]++] = symbol;
 					}
 				}
 
@@ -48,7 +48,7 @@ namespace Generic {
 			}
 
 			template<typename Backing, typename Type>
-			int decode(BitReader<Backing, Type>& ms) {
+			int decode(BitReader<Backing, Type>* ms) {
 				int len; //current number of bits in code
 				int code; //len bits being decoded
 				int first; //first code of length len
@@ -59,9 +59,9 @@ namespace Generic {
 				uint8_t bit = 0;
 				for (len = 1; len < max_count_size; len++) {
 					bit = 0;
-					ms.ReadBits(&bit, 1);
+					ms->ReadBits(&bit, 1);
 					code |= bit;
-					count = this.count[len];
+					count = this->count[len];
 					if (code - count < first) {
 						return symbol[index + (code - first)];
 					}

@@ -4,14 +4,19 @@
 #include "../interface/data-source.h"
 #include <csetjmp>
 #include "../huffman/huffman.h"
+#include <array>
 
 namespace ImageLibrary {
 	namespace zlib {
 		const static unsigned short sliding_32k = 32768;
+		const static unsigned short clamp_32k = 32767;
 
 		enum class State : uint8_t {
 			Init,
-			Finished
+			Finished,
+			Decoding,
+			NewBlock,
+			WaitingForRead,
 		};
 
 		enum class BlockType : uint8_t {
@@ -37,6 +42,31 @@ namespace ImageLibrary {
 			static const short MAXBITS = 16;
 
 			short lengths[MAXCODES] = {};
+			static constexpr std::array<short, FIXLCODES> staticLengths{ []() consteval {
+				std::array<short, FIXLCODES> result{};
+				int symbol;
+				for (symbol = 0; symbol < 144; symbol++) {
+					result[symbol] = 8;
+				}
+				for (; symbol < 256; symbol++) {
+					result[symbol] = 9;
+				}
+				for (; symbol < 280; symbol++) {
+					result[symbol] = 7;
+				}
+				for (; symbol < FIXLCODES; symbol++) {
+					result[symbol] = 8;
+				}
+				return result;
+			}() };
+			static constexpr std::array<short, MAXDCODES> staticDistances{ []() consteval {
+				std::array<short, MAXDCODES> result{};
+				int symbol;
+				for (symbol = 0; symbol < MAXDCODES; symbol++) {
+					result[symbol] = 5;
+				}
+				return result;
+			}() };
 			/*short lenCount[MAXBITS] = {}, lenSymbolsStatic[FIXLCODES] = {}, lenSymbolsDynamic[MAXLCODES] = {};
 			short distCount[MAXBITS] = {}, distSymbols[MAXDCODES] = {}; */
 
@@ -58,6 +88,7 @@ namespace ImageLibrary {
 
 			unsigned int ext_pointer = 0;
 			unsigned int write_pointer = 0;
+			unsigned int written_current_period = 0; /* Goes down as external reads from sliding window */
 			unsigned int max = 0;
 			uint8_t byte = 0; //for storing partial reads
 			uint8_t bit_pointer = 0; //0-7 indexing individual bits
@@ -65,17 +96,30 @@ namespace ImageLibrary {
 
 			State state;
 			BlockType type;
-			Generic::huffman::Huffman<MAXBITS, FIXLCODES> staticLengthCodes;
-			Generic::huffman::Huffman<MAXBITS, MAXLCODES> dynamicLengthCodes;
-			Generic::huffman::Huffman<MAXBITS, MAXDCODES> distCodes;
+			Generic::huffman::Huffman<MAXBITS, FIXLCODES> staticLengthTable;
+			Generic::huffman::Huffman<MAXBITS, MAXLCODES> dynamicLengthTable;
+			Generic::huffman::Huffman<MAXBITS, MAXDCODES> distTable;
+
+			bool pending_copy = false;
+			unsigned int copy_amount_remaining = 0;
+			unsigned int copyLocation = 0;
+
+			bool final = false;
+			unsigned long long amountWritten = 0;
 		private:
 			void Loop();
 
 			void Init();
 			void NewBlock();
+
 			void BuildStatic();
 			void BuildDynamic();	
 
+			void Decode();
+			void LengthDistPairCopy();
+			inline void Write(uint8_t byte);
+
+			void ReadSlidingWindow(uint8_t* out, const unsigned int length);
 		public:
 			/* Gets source to compressed data and constructs 32kb sliding window */
 			ZLIBStream(Generic::Data<Backing, uint8_t, Generic::Mode::Read>* source) : Generic::Data<std::vector<uint8_t>, uint8_t, Generic::Mode::Read>(sliding_32k), src(source) {};

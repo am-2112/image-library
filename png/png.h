@@ -119,6 +119,14 @@ namespace ImageLibrary {
 			Blue
 		};
 
+		enum class PNG_Filter : uint8_t {
+			Filter_None,
+			Filter_Sub,
+			Filter_Up,
+			Filter_Average,
+			Filter_Paeth
+		};
+
 		class ReturnInterlacedPass : std::exception {};
 
 		template<typename Backing>
@@ -134,6 +142,7 @@ namespace ImageLibrary {
 			ImageData* out;
 			const ImageOptions* opt;
 			ImageReturnInfo currentImageInfo;
+			ImageFormat baseFormat;
 			Color_Type color_type;
 
 			struct PaletteEntry {
@@ -149,12 +158,18 @@ namespace ImageLibrary {
 			/* chunk data is handled this way in case of extremely large (and/or erroneous) chunk length values */
 			/* Also, for IDAT, it will be faster to chunk read (if from file, but will do this anyway) and use _current to pass data to zlib */
 			uint8_t _current[buffer_size] = {};
-			unsigned short _pointer;
-			unsigned short _max;
-			unsigned int _remaining_length;
-			unsigned int _last_read_count;
+			unsigned short _pointer = 0;
+			unsigned short _max = 0;
+			unsigned int _remaining_length = 0;
+			unsigned int _last_read_count = 0;
 
 			bool interlaced = false;
+			std::vector<ImageData> passes = std::vector<ImageData>(7);
+			uint8_t interlacePass = 0; /* 0-6 */
+			bool iPreProcessed = false;
+			PNG_Filter currentFilter;
+
+			bool firstIDAT = true;
 		private:
 			void BaseRead(uint8_t* out, const int length, const bool updateCRC); //will also update current crc if needed for validation
 			void CheckCRC();
@@ -172,13 +187,14 @@ namespace ImageLibrary {
 			void BeginReadIDAT();
 
 			void UpdateCurrentBuffer();
+			void GetNextIDAT();
 
-			//may need additional template parameters for intrinsics (like in other program implementation)
 			void GetUnfilteredData();
-			void Filter();
-			void ConvertFormat(); //will also modify return image format here (so user can check it against desired if provided in options)
 
 			void FlagCurrentChunk(ChunkFlag& toChange);
+
+			template<typename Pixel>
+			void FilterPass();
 		public:
 			using Generic::Data<Backing, uint8_t, Generic::Mode::Read>::Data; //inherit Data constructor
 
