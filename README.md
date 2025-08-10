@@ -11,5 +11,7 @@ The generic interface for image encoders/decoders can be found at interface/imag
 
 The definitions for the image data structures can be found at interface/image-data-interface.h
 
+*add code snippets
+
 ## Unit Tests:
 Within the directory for the specific format, there will be a test folder containing necessary resources as well as a test.cpp file to run.
