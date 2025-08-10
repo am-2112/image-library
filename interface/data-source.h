@@ -9,6 +9,10 @@ namespace Generic {
 		Write,
 	};
 
+	static uint32_t ConvertEndian(const uint8_t* pointer) {
+		return *pointer << 24 | *(pointer + 1) << 16 | *(pointer + 2) << 8 | *(pointer + 3);
+	}
+
 	/* ======= General Definitions ======= */
 
 	/* Primary Template */
@@ -49,7 +53,7 @@ namespace Generic {
 	struct Data<std::basic_ifstream<Type, std::char_traits<Type>>, Type, Read> {
 		std::basic_ifstream<Type, std::char_traits<Type>> source;
 
-		Data(std::string filePath) : source(filePath) {}
+		Data(std::string filePath) : source(filePath, std::ios_base::binary) {}
 
 		virtual void Read(Type* out, const unsigned int length) {
 			source.read(out, length);
@@ -71,10 +75,10 @@ namespace Generic {
 			return source.peek();
 		}
 		virtual void Seek(const unsigned int amount) {
-			source.seekg(amount, std::ios_base::beg);
+			source.seekg(amount, std::ios_base::cur);
 		}
 		virtual void SeekBack(const unsigned int amount) {
-			source.seekg(-amount, std::ios_base::beg);
+			source.seekg(-amount, std::ios_base::cur);
 		}
 	};
 
@@ -236,7 +240,7 @@ namespace Generic {
 				bytePresent = true;
 
 				for (uint8_t out_bit_pointer = bitsPresent; out_bit_pointer < remaining_bits + bitsPresent; out_bit_pointer++) {
-					if (out_bit_pointer % 8 == 0) {
+					if (out_bit_pointer != 0 && out_bit_pointer % 8 == 0) {
 						out++;
 					}
 
@@ -244,6 +248,12 @@ namespace Generic {
 					*out |= (current_bit << (out_bit_pointer % 8));
 				}
 			}
+		}
+
+		void ResetBitPointer() {
+			byte = 0;
+			bit_pointer = 0;
+			bytePresent = false;
 		}
 	};
 }

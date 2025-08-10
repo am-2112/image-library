@@ -54,7 +54,23 @@ namespace ImageLibrary {
 			final = header & 0x1;
 			type = (BlockType)((header & 0x6) >> 1);
 
-			if (type == BlockType::Static) {
+			if (type == BlockType::Stored) {
+				src.ResetBitPointer();
+
+				/* get block length */
+				literalDataLength = 0;
+				src.src->Read((uint8_t*)&literalDataLength, 2);
+				unsigned int complement = 0;
+				src.src->Read((uint8_t*)&complement, 2);
+
+				literalDataLength = Generic::ConvertEndian((uint8_t*)&literalDataLength);
+				complement = Generic::ConvertEndian((uint8_t*)&complement);
+
+				if (literalDataLength != ~complement)
+					throw exception("Invalid block length!");
+
+			}
+			else if (type == BlockType::Static) {
 				BuildStatic();
 			}
 			else if (type == BlockType::Dynamic) {
@@ -90,12 +106,8 @@ namespace ImageLibrary {
 
 			//read code length code lengths; missing lengths are zero
 			int index = 0;
-			uint8_t bit = 0;
 			for (; index < n_codes; index++) {
-				bit = 0;
-				src.ReadBits(&bit, 3);
-
-				lengths[order[index]] = bit;
+				src.ReadBits((uint8_t*)&lengths[order[index]], 3);
 			}
 			for (; index < MAXCODELENGTHS; index++) { //if the codelengths have not all been defined, set the rest to 0 (since they must not exist)
 				lengths[order[index]] = 0;
@@ -111,14 +123,12 @@ namespace ImageLibrary {
 				int len = 0; //last length to repeat (assume 0)
 
 				symbol = dynamicLengthTable.decode(&src);
-				bool repeat = false;
+				bool repeat = true;
 				switch (symbol) {
 				case -1: //invalid symbol
 					throw exception("[ZLIB] Invalid symbol found (dynamic)");
 					break;
-				case 16: //repeat last length 3 to 6 times (fall through here)
-					repeat = true;
-
+				case 16: //repeat last length 3 to 6 times
 					if (index == 0) { throw exception("[ZLIB] Invalid index into lengths (dynamic)"); }
 					len = lengths[index - 1];
 
@@ -128,16 +138,12 @@ namespace ImageLibrary {
 
 					break;
 				case 17: //repeat value 0 for 3 to 10 times
-					repeat = true;
-
 					symbol = 0;
 					src.ReadBits((uint8_t*)&symbol, 3);
 					symbol += 3;
 
 					break;
 				case 18: //repeat value 0 for 11 to 138 times
-					repeat = true;
-
 					symbol = 0;
 					src.ReadBits((uint8_t*)&symbol, 7);
 					symbol += 11;
@@ -145,6 +151,7 @@ namespace ImageLibrary {
 					break;
 				default: //must be under 16 (so set it to the symbol)
 					lengths[index++] = symbol;
+					repeat = false;
 					break;
 				}
 
@@ -191,6 +198,11 @@ namespace ImageLibrary {
 		void ZLIBStream<Backing, Mode::Read>::Read(uint8_t* out, const unsigned int length) {
 			last_read = 0;
 
+			/* Potential for overwrites here; should clamp / check length */
+			if (state == State::WaitingForRead && length > written_current_period) {
+				state = State::Decoding;
+			}
+
 			/* Decode more data if there is room in the sliding window */
 			while (state != State::WaitingForRead && written_current_period < length && state != State::Finished) {
 				Loop();
@@ -198,9 +210,9 @@ namespace ImageLibrary {
 			if (written_current_period >= length) {
 				/* Read from sliding window */
 				ReadSlidingWindow(out, length);
-				if (state == State::WaitingForRead && length >= copy_amount_remaining) {
+				/* if (state == State::WaitingForRead && length >= copy_amount_remaining) {
 					state = State::Decoding;
-				}
+				}*/
 			}
 		}
 
@@ -212,7 +224,7 @@ namespace ImageLibrary {
 		void ZLIBStream<Backing, Mode::Read>::Decode() {
 			while (written_current_period < sliding_32k) {
 				if (pending_copy) {
-					if (written_current_period + copy_amount_remaining > sliding_32k) {
+					if (written_current_period + copy_amount_remaining <= sliding_32k) {
 						LengthDistPairCopy();
 						pending_copy = false;
 					}
@@ -226,7 +238,8 @@ namespace ImageLibrary {
 				if (type == BlockType::Stored) {
 					uint8_t byte = 0;
 					src.src->Read(&byte, 1);
-					if (byte == 255) {
+					literalDataLength--;
+					if (literalDataLength == 0) {
 						if (final) {
 							state = State::Finished;
 						}
@@ -248,6 +261,8 @@ namespace ImageLibrary {
 					else {
 						symbol = dynamicLengthTable.decode(&src);
 					}
+					if (symbol < 0)
+						throw exception("Invalid Symbol!");
 					if (symbol == 256) {	
 						if (final) {
 							state = State::Finished;
@@ -266,13 +281,18 @@ namespace ImageLibrary {
 							symbol -= 257;
 							if (symbol >= 29) { throw exception("[ZLIB] Invalid fixed code"); }
 
-							uint8_t bit = 0;
-							src.ReadBits(&bit, lext[symbol]);
+							/* short because dext can go over 8 bits */
+							unsigned short bit = 0;
+							src.ReadBits((uint8_t*)&bit, lext[symbol]);
+
 							unsigned int len = lens[symbol] + bit;
 
 							//get and check distance
 							symbol = distTable.decode(&src);
 							if (symbol < 0) { throw exception("[ZLIB] Invalid dist symbol"); }
+
+							bit = 0;
+							src.ReadBits((uint8_t*)&bit, dext[symbol]);
 
 							unsigned int dist = dists[symbol] + bit;
 							if (dist > amountWritten) { throw exception("[ZLIB] Back-reference too far back"); }
@@ -285,7 +305,7 @@ namespace ImageLibrary {
 							copy_amount_remaining = len;
 							copyLocation = location;
 
-							if (copy_amount_remaining >= written_current_period) {
+							if (copy_amount_remaining + written_current_period <= sliding_32k) {
 								LengthDistPairCopy();
 							}
 							else {

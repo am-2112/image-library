@@ -4,7 +4,26 @@
 #include <iostream>
 #include "png/png.h"
 
+using namespace ImageLibrary;
+
 int main() {
 	std::cout << "Hello World";
-	ImageLibrary::PNG::PNGStream<std::basic_ifstream<uint8_t, std::char_traits<uint8_t>>, Generic::Mode::Read> png("C:\\Users\\madma\\Desktop\\github\\image-library\\png\\test\\test-suite\\basi0g01.png");
+
+	PNG::PNGStream<std::basic_ifstream<uint8_t, std::char_traits<uint8_t>>, Generic::Mode::Read> png("C:\\Users\\madma\\Desktop\\github\\image-library\\png\\test\\test-suite\\basi0g01.png");
+	ImageOptions opt = { .receiveInterlaced = true, .receiveAnimation = true };
+	ImageData data;
+
+	bool final = false;
+	while (!final) {
+		ImageReturnInfo info = png.ReadData(&data, &opt);
+		final = info.final;
+		if (info.valid) {
+			ImageStreamState state = png.QueryState();
+			int breakpoint = 0;
+		}
+		else {
+			PNG::PNGStreamState state = png.ExtQueryState();
+			int breakpoint = 0;
+		}
+	}
 }

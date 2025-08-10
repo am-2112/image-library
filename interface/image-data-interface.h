@@ -27,6 +27,11 @@ namespace ImageLibrary {
 		RGBA16 = 0b0111100010000,
 	};
 
+	struct size {
+		uint32_t width;
+		uint32_t height;
+	};
+
 	struct ImageFormat {
 		unsigned short bitsPerPixel = 0;
 		FormatDetails formatting = FormatDetails::Any;
@@ -34,8 +39,7 @@ namespace ImageLibrary {
 
 	struct ImageData {
 		std::vector<uint8_t> image;
-		size_t height;
-		size_t width;
+		size dimensions;
 		ImageFormat format;
 	};
 
@@ -55,7 +59,7 @@ namespace ImageLibrary {
 	};
 
 	struct AnimationInfo {
-		bool hasAnimation;
+		bool hasAnimation = false;
 		unsigned int animationID;
 		int relativeX;
 		int relativeY;
@@ -67,7 +71,7 @@ namespace ImageLibrary {
 		bool valid;
 		bool isInterlaced;
 		AnimationInfo animInfo;
-		bool final;
+		bool final = false;
 	};
 
 	struct ImageStreamState {

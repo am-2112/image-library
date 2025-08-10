@@ -63,32 +63,33 @@ namespace ImageLibrary {
 			FILTER_PAETH
 		};
 
+		/* Stored in little-endian (as stored in file) */
 		enum class ChunkType : unsigned int {
 			NONE = 0,
-			IHDR = 0x49484452,
-			PLTE = 0x504C5445,
-			IDAT = 0x49444154,
-			IEND = 0x49454E44,
-			tRNS = 0x74524E53,
-			cHRM = 0x6348524D,
-			gAMA = 0x67414D41,
-			iCCP = 0x69434350,
-			sBIT = 0x73424954,
-			sRGB = 0x73524742,
-			cICP = 0x63494350,
-			mDCV = 0x6D444356,
-			iTXt = 0x69545874,
-			tEXt = 0x74455874,
-			zTXt = 0x7A545874,
-			bKGD = 0x624B4744,
-			hlST = 0x686C5354,
-			pHYs = 0x70485973,
-			sPLT = 0x73504C54,
-			eXlf = 0x65586C66,
-			tIME = 0x74494D45,
-			acTL = 0x6163544C,
-			fcTL = 0x6663544C,
-			fdAT = 0x66644154,
+			IHDR = 0x52444849,
+			PLTE = 0x45544C50,
+			IDAT = 0x54414449,
+			IEND = 0x444E4549,
+			tRNS = 0x534E5274,
+			cHRM = 0x4D524863,
+			gAMA = 0x414D4167,
+			iCCP = 0x50434369,
+			sBIT = 0x54494273,
+			sRGB = 0x42475273,
+			cICP = 0x50434963,
+			mDCV = 0x5643446D,
+			iTXt = 0x74585469,
+			tEXt = 0x74584574,
+			zTXt = 0x7458547A,
+			bKGD = 0x44474B62,
+			hlST = 0x54536C68,
+			pHYs = 0x73594870,
+			sPLT = 0x544C5073,
+			eXlf = 0x666C5865,
+			tIME = 0x454D4974,
+			acTL = 0x4C546361,
+			fcTL = 0x4C546366,
+			fdAT = 0x54416466,
 		};
 
 		enum class Color_Type : uint8_t {
@@ -129,10 +130,15 @@ namespace ImageLibrary {
 
 		class ReturnInterlacedPass : std::exception {};
 
+		struct ImagePass : ImageData {
+			uint8_t passNumber;
+			size reduced;
+		};
+
 		template<typename Backing>
 		class PNGStream<Backing, Generic::Mode::Read> : public Generic::Data<Backing, uint8_t, Generic::Mode::Read>, public ImageStreamInterface<Backing, Generic::Mode::Read> {
 		private:
-			const static uint64_t signature = 0x89504E470D0A1A0A;
+			const static uint64_t signature = 0x0A1A0A0D474E5089; // 0x89504E470D0A1A0A;
 			const static short buffer_size = 8192;
 			PNGStreamState state;
 		
@@ -141,6 +147,7 @@ namespace ImageLibrary {
 			
 			ImageData* out;
 			const ImageOptions* opt;
+			ImageData current;
 			ImageReturnInfo currentImageInfo;
 			ImageFormat baseFormat;
 			Color_Type color_type;
@@ -164,12 +171,13 @@ namespace ImageLibrary {
 			unsigned int _last_read_count = 0;
 
 			bool interlaced = false;
-			std::vector<ImageData> passes = std::vector<ImageData>(7);
+			std::vector<ImagePass> passes = std::vector<ImagePass>(7);
 			uint8_t interlacePass = 0; /* 0-6 */
 			bool iPreProcessed = false;
 			PNG_Filter currentFilter;
 
 			bool firstIDAT = true;
+			short actualbpp = 0;
 		private:
 			void BaseRead(uint8_t* out, const int length, const bool updateCRC); //will also update current crc if needed for validation
 			void CheckCRC();

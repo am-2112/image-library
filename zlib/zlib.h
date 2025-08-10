@@ -106,6 +106,8 @@ namespace ImageLibrary {
 
 			bool final = false;
 			unsigned long long amountWritten = 0;
+
+			unsigned short literalDataLength = 0;
 		private:
 			void Loop();
 

@@ -4,6 +4,9 @@
 
 namespace Generic {
 	namespace huffman {
+		/* from puff.c
+		will develop my own version later once the zlib stream and png decoder is working
+		*/
 		template<unsigned short max_count_size, unsigned short max_symbol_size>
 		struct Huffman {
 			short count[max_count_size] = {};
@@ -14,6 +17,10 @@ namespace Generic {
 				int length;
 				int codesLeft;
 				short offs[max_count_size] = {};
+
+				/* Reset arrays (between construct uses, if reused) */
+				memset(count, 0, max_count_size);
+				memset(this->symbol, 0, max_symbol_size);
 
 				/* Count number of codes of each length */
 				for (symbol = 0; symbol < codeLengthsSize; symbol++) {
@@ -62,9 +69,8 @@ namespace Generic {
 					ms->ReadBits(&bit, 1);
 					code |= bit;
 					count = this->count[len];
-					if (code - count < first) {
+					if (code - count < first)
 						return symbol[index + (code - first)];
-					}
 
 					index += count;
 					first += count;
