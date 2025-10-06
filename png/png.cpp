@@ -390,6 +390,11 @@ namespace ImageLibrary {
 		template<typename Pixel> void PNGStream<Backing, Generic::Read>::FilterPass() {
 			unsigned int width;
 			unsigned int height;
+
+			if (!interlaced) {
+				out->image = vector<uint8_t>(out->dimensions.width * out->dimensions.height);
+			}
+
 			Pixel* target = (Pixel*)out->image.data();
 
 			/* If pixel is smaller than byte, make an array to hold the bit values (loop backwards since left = high-order bits) */
@@ -540,7 +545,17 @@ namespace ImageLibrary {
 							if (loop == pixelBits.size() - 1) {
 								uint8_t index = 0;
 								for (int i = 0; i < 8; i += actualbpp) {
-									pixelBits[index++] = (current[0] & (bitAnd << i)) >> i;
+									pixelBits[index] = (current[0] & (bitAnd << i)) >> i;
+
+									/* Scale up by using left bit replication
+									Begin by left shifting, then repeating most significant bits into the open bits
+									*/
+									pixelBits[index] = pixelBits[index] << (8 - actualbpp);
+									for (int j = 0; j < 8 / actualbpp; j++) {
+										pixelBits[index] |= pixelBits[index] >> actualbpp;
+									}
+
+									index++;
 								}
 							}
 

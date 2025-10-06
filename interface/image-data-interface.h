@@ -25,7 +25,24 @@ namespace ImageLibrary {
 		RGB16 = 0b0111000010000,
 		RGBA8 = 0b0111100001000,
 		RGBA16 = 0b0111100010000,
+		has128 = 0b0000010000000,
+		has64 = 0b0000001000000,
+		has32 = 0b0000000100000,
+		has16 = 0b0000000010000,
+		has8 = 0b0000000001000,
+		has4 = 0b0000000000100,
+		has2 = 0b0000000000010,
+		has1 = 0b0000000000001,
+		hasGray = 0b1000000000000,
+		hasAlpha = 0b0000100000000,
+		hasRGB = 0b0111000000000,
 	};
+	inline FormatDetails operator&(FormatDetails r, FormatDetails l) {
+		return (FormatDetails)((unsigned short)r & (unsigned short)l);
+	}
+	inline FormatDetails operator|(FormatDetails r, FormatDetails l) {
+		return (FormatDetails)((unsigned short)r | (unsigned short)l);
+	}
 
 	struct size {
 		uint32_t width;

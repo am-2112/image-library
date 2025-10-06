@@ -81,10 +81,7 @@ namespace ImageLibrary {
 		template<typename Backing>
 		void ZLIBStream<Backing, Mode::Read>::BuildStatic() {
 			bool failure = staticLengthTable.construct(staticLengths.data(), FIXLCODES);
-			if (failure) { throw exception("[ZLIB] Unable to construct huffman table (static)"); }
-
 			failure = distTable.construct(staticDistances.data(), MAXDCODES);
-			if (failure) { throw exception("[ZLIB] Unable to construct huffman table (static)"); }
 		}
 
 		template<typename Backing>
