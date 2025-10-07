@@ -561,6 +561,15 @@ namespace ImageLibrary {
 
 							current[0] = pixelBits[loop--];
 						}
+						else { //reverse bit order for endianness (only effective for 16-bit since 16-bit samples stored in network byte order (MSB first)
+							uint8_t temp[sizeof(Pixel)];
+							for (int i = 0; i < sizeof(Pixel); i++) { //reverse bytes
+								temp[i] = current[sizeof(Pixel) - i - 1];
+							}
+							for (int i = 0; i < sizeof(Pixel); i++) { //copy temp to current
+								current[i] = temp[i];
+							}
+						}
 
 
 						switch (currentFilter) {
@@ -574,9 +583,9 @@ namespace ImageLibrary {
 							break;
 						case PNG_Filter::Filter_Average: {
 							/* Widen first (not allowing overflow until the final addition) */
-							__m256i a = _mm256_cvtepi8_epi16(*prevPixelView);
-							__m256i b = _mm256_cvtepi8_epi16(*(prevRowView + 1));
-							__m256i pix = _mm256_cvtepi8_epi16(*currentPixelView);
+							__m256i a = _mm256_cvtepu8_epi16(*prevPixelView);
+							__m256i b = _mm256_cvtepu8_epi16(*(prevRowView + 1));
+							__m256i pix = _mm256_cvtepu8_epi16(*currentPixelView);
 
 							__m256i avg = _mm256_avg_epu16(a, b);
 							*fullResultView = _mm256_add_epi8(pix, avg); //allow overflow here
@@ -589,11 +598,11 @@ namespace ImageLibrary {
 						}
 						case PNG_Filter::Filter_Paeth: {
 							/* Widen first (not allowing overflow until the final addition) */
-							__m256i a = _mm256_cvtepi8_epi16(*prevPixelView);
-							__m256i b = _mm256_cvtepi8_epi16(*(prevRowView + 1));
-							__m256i c = _mm256_cvtepi8_epi16(*prevRowView);
+							__m256i a = _mm256_cvtepu8_epi16(*prevPixelView);
+							__m256i b = _mm256_cvtepu8_epi16(*(prevRowView + 1));
+							__m256i c = _mm256_cvtepu8_epi16(*prevRowView);
 
-							__m256i pix = _mm256_cvtepi8_epi16(*currentPixelView);
+							__m256i pix = _mm256_cvtepu8_epi16(*currentPixelView);
 
 							__m256i pa = _mm256_sub_epi16(b, c);
 							__m256i pb = _mm256_sub_epi16(a, c);
@@ -639,12 +648,13 @@ namespace ImageLibrary {
 							currentRow += rowIncrement;
 							newColumn = true;
 							readAmount = sizeof(uint8_t); /* Set to read filter byte next iteration */
+							*prevRowView = *prevPixelView;
 							prevRowView = (__m128i*)prevRow.data();
 
-							memset(&prev, 0, sizeof(__m128i));
+							memset(prev.data(), 0, sizeof(__m128i));
 							memset(pixelBits.data(), 0, pixelBits.size());
 							loop = -1; //break out of loop (ignore low-order bits)
-							current[0] = 0;
+							memset(current.data(), 0, sizeof(__m128i)); //current[0] = 0;
 
 
 							/* Then, set the ImageData image to the current pass (if receiveInterlaced; otherwise, only do this for the last pass (pass 7)) */
