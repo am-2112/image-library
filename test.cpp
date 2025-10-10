@@ -214,9 +214,11 @@ void Test(std::string fPath, std::shared_ptr<GLFWwindow> window) {
 			glFlush();
 			glfwSwapBuffers(window.get());
 
-			std::cout << "enter for next image" << std::endl;
-			std::string next;
-			std::getline(std::cin, next);
+			if (!final) {
+				std::cout << "enter for next image>" << std::endl;
+				std::string next;
+				std::getline(std::cin, next);
+			}
 		}
 		else {
 			PNG::PNGStreamState state = png.ExtQueryState();

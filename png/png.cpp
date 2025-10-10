@@ -184,6 +184,10 @@ namespace ImageLibrary {
 			BaseRead((uint8_t*)&color_t, 1, true);
 			color_type = color_t;
 
+			if (bpc == 16) {
+				c16 = true;
+			}
+
 			switch (color_t) {
 			case Color_Type::Greyscale:
 				if (!(bpc == 1 || bpc == 2 || bpc == 4 || bpc == 8 || bpc == 16)) {
@@ -392,7 +396,7 @@ namespace ImageLibrary {
 			unsigned int height;
 
 			if (!interlaced) {
-				out->image = vector<uint8_t>(out->dimensions.width * out->dimensions.height);
+				out->image = vector<uint8_t>(out->dimensions.width * out->dimensions.height * (actualbpp / 8));
 			}
 
 			Pixel* target = (Pixel*)out->image.data();
@@ -425,6 +429,7 @@ namespace ImageLibrary {
 
 				width = out->dimensions.width;
 				height = out->dimensions.height;
+				int rwidth = width;
 
 				if (interlaced) {
 					width = passes[interlacePass].dimensions.width;
@@ -460,6 +465,7 @@ namespace ImageLibrary {
 				if (interlaced) {
 					width = passes[interlacePass].dimensions.width;
 					height = passes[interlacePass].dimensions.height;
+					rwidth = passes[interlacePass].reduced.width;
 					totalPixels = passes[interlacePass].reduced.width * passes[interlacePass].reduced.height;
 					target = (Pixel*)passes[interlacePass].image.data();
 
@@ -496,7 +502,8 @@ namespace ImageLibrary {
 					}
 				}
 
-				std::vector<uint8_t> prevRow(sizeof(__m128i) * (width + 1)); /* +1, since will index (currentPixelI - 1) for upper left */
+
+				std::vector<uint8_t> prevRow(sizeof(__m128i) * (rwidth + 1)); /* +1, since will index (currentPixelI - 1) for upper left */
 				Pixel* prevRowPixels = (Pixel*)prevRow.data();
 				__m128i* prevRowView = (__m128i*)prevRow.data();
 
@@ -561,16 +568,21 @@ namespace ImageLibrary {
 
 							current[0] = pixelBits[loop--];
 						}
-						else { //reverse bit order for endianness (only effective for 16-bit since 16-bit samples stored in network byte order (MSB first)
+						else if (c16) { //reverse bit order for endianness (for 16-bit channel samples since 16-bit samples are stored in network byte order (MSB first)
 							uint8_t temp[sizeof(Pixel)];
-							for (int i = 0; i < sizeof(Pixel); i++) { //reverse bytes
-								temp[i] = current[sizeof(Pixel) - i - 1];
+
+							for (int i = 0; i < sizeof(Pixel); i+=2) {
+								temp[i] = current[i + 1];
+								temp[i + 1] = current[i];
 							}
+
+							//for (int i = 0; i < sizeof(Pixel); i++) { //reverse bytes
+								//temp[i] = current[sizeof(Pixel) - i - 1];
+							//}
 							for (int i = 0; i < sizeof(Pixel); i++) { //copy temp to current
 								current[i] = temp[i];
 							}
 						}
-
 
 						switch (currentFilter) {
 						case PNG_Filter::Filter_None:
@@ -794,8 +806,14 @@ namespace ImageLibrary {
 			case 2:
 				FilterPass<uint16_t>();
 				break;
+			case 3:
+				FilterPass<uint24_t>();
+				break;
 			case 4:
 				FilterPass<uint32_t>();
+				break;
+			case 6:
+				FilterPass<uint48_t>();
 				break;
 			case 8:
 				FilterPass<uint64_t>();

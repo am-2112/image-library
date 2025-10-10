@@ -4,11 +4,25 @@
 #include <fstream>
 
 namespace Generic {
+
+#pragma pack(push, 1)
+	typedef struct uint24_t {
+		uint8_t Data1;
+		uint8_t Data2;
+		uint8_t Data3;
+	};
+	typedef struct uint48_t {
+		uint16_t Data1;
+		uint16_t Data2;
+		uint16_t Data3;
+	};
+#pragma pack(pop)
+
 	enum Mode : uint8_t {
 		Read,
 		Write,
 	};
-
+	
 	static uint32_t ConvertEndian(const uint8_t* pointer) {
 		return *pointer << 24 | *(pointer + 1) << 16 | *(pointer + 2) << 8 | *(pointer + 3);
 	}

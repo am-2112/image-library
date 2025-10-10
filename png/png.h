@@ -151,6 +151,7 @@ namespace ImageLibrary {
 			ImageReturnInfo currentImageInfo;
 			ImageFormat baseFormat;
 			Color_Type color_type;
+			bool c16 = false; //flag for if channels have 16-bit samples and therefore will be stored in network-byte order
 
 			struct PaletteEntry {
 				uint8_t color[3];
