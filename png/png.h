@@ -154,9 +154,13 @@ namespace ImageLibrary {
 			bool c16 = false; //flag for if channels have 16-bit samples and therefore will be stored in network-byte order
 
 			struct PaletteEntry {
-				uint8_t color[3];
+				union {
+					uint8_t color[3];
+					Generic::uint24_t colors;
+				};	
 			};
 			std::vector<PaletteEntry> palette;
+			uint8_t paletteBPC;
 
 			std::unordered_map<ChunkType, ChunkHeader> chunkHistory;
 			ChunkHeader prevChunk; //specifically to ensure that multiple IDAT chunks are consecutive

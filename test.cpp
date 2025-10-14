@@ -45,6 +45,7 @@ int main() {
 
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE); /* Compatibility to use glDrawPixels */
 	std::shared_ptr<GLFWwindow> window(glfwCreateWindow(640, 480, "view", NULL, NULL));
 	if (window.get() == nullptr) {
@@ -55,7 +56,7 @@ int main() {
 	glfwMakeContextCurrent(window.get());
 	glViewport(0, 0, 640, 480);
 
-	glClearColor(1.0, 0.0, 1.0, 1.0);
+	glClearColor(1.0, 0.0, 1.0, 0.5);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glFlush();
 

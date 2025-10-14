@@ -131,7 +131,7 @@ namespace ImageLibrary {
 			if (chunkHistory.contains(ChunkType::IEND)) { throw std::exception("IEND should be last!"); } //IEND should always be last
 			if (!firstIDAT && currentChunk.type == ChunkType::IDAT && prevChunk.type != ChunkType::IDAT) { throw exception("IDAT chunks should be next to each other"); }
 
-			bool isCritical = (((unsigned int)currentChunk.type & 0x000000FF) >> 3) & 0x1; //if first letter uppercase, chunk is critical (5th bit)
+			bool isCritical = !((unsigned int)currentChunk.type & 0x00000020); //if first letter uppercase, chunk is critical (5th bit)
 			if (isCritical) {
 				ProcessCriticalChunk();
 			}
@@ -219,6 +219,7 @@ namespace ImageLibrary {
 					throw std::exception("Invalid Format Settings");
 				}
 				else {
+					paletteBPC = bpc;
 					actualbpp = 24;
 					current.format = {
 						.bitsPerPixel = 24, //always 8bpc for indexed
@@ -395,20 +396,26 @@ namespace ImageLibrary {
 			unsigned int width;
 			unsigned int height;
 
+			uint8_t actualReadBpp = actualbpp;
+			if (palette.size() > 0) {
+				actualReadBpp = paletteBPC;
+			}
+
 			if (!interlaced) {
 				out->image = vector<uint8_t>(out->dimensions.width * out->dimensions.height * (actualbpp / 8));
 			}
 
 			Pixel* target = (Pixel*)out->image.data();
+			uint24_t* rgbTarget = (uint24_t*)out->image.data();
 
 			/* If pixel is smaller than byte, make an array to hold the bit values (loop backwards since left = high-order bits) */
 			vector<uint8_t> pixelBits(0);
-			if (actualbpp != sizeof(Pixel) * 8) {
-				pixelBits = vector<uint8_t>(8 / actualbpp);
+			if (actualReadBpp != sizeof(Pixel) * 8) {
+				pixelBits = vector<uint8_t>(8 / actualReadBpp);
 			}
 
 			uint8_t bitAnd = 0;
-			switch (actualbpp) {
+			switch (actualReadBpp) {
 			case 1:
 				bitAnd = 1;
 				break;
@@ -468,10 +475,12 @@ namespace ImageLibrary {
 					rwidth = passes[interlacePass].reduced.width;
 					totalPixels = passes[interlacePass].reduced.width * passes[interlacePass].reduced.height;
 					target = (Pixel*)passes[interlacePass].image.data();
+					rgbTarget = (uint24_t*)passes[interlacePass].image.data();
 
 					/* Put pixels from previous pass into correct place in this image's pass & prepare new pass indexing */
 					if (interlacePass > 0) {
 						Pixel* prevPass = (Pixel*)passes[interlacePass - 1].image.data();
+						uint24_t* prevRgbPass = (uint24_t*)passes[interlacePass - 1].image.data();
 
 						if (interlacePass == 1 || interlacePass == 3 || interlacePass == 5) {
 							/* These passes insert columns */
@@ -482,7 +491,12 @@ namespace ImageLibrary {
 							unsigned int prevIndex = 0;
 							for (unsigned int cRow = 0; cRow < height; cRow++) {
 								for (unsigned int cCol = 0; cCol < width; cCol+= 2) { /* original data on even col */		
-									target[(cRow * width) + cCol] = prevPass[prevIndex++];
+									if (palette.size() == 0) {
+										target[(cRow * width) + cCol] = prevPass[prevIndex++];
+									}
+									else {
+										rgbTarget[(cRow * width) + cCol] = prevRgbPass[prevIndex++];
+									}
 								}
 							}
 
@@ -495,7 +509,12 @@ namespace ImageLibrary {
 							unsigned int prevIndex = 0;
 							for (unsigned int cRow = 0; cRow < height; cRow+= 2) { /* original data on even row */
 								for (unsigned int cCol = 0; cCol < width; cCol ++) {
-									target[(cRow * width) + cCol] = prevPass[prevIndex++];
+									if (palette.size() == 0) {
+										target[(cRow * width) + cCol] = prevPass[prevIndex++];
+									}
+									else {
+										rgbTarget[(cRow * width) + cCol] = prevRgbPass[prevIndex++];
+									}
 								}
 							}
 						}
@@ -547,21 +566,22 @@ namespace ImageLibrary {
 						If then results in new scanline, ignore the rest of the bits in current byte
 						The left-most pixel is in the high-order bits
 						*/
-						if (actualbpp != readAmount * 8) {
+						if (actualReadBpp != readAmount * 8) {
 							/* Put data into pixelBits vector in correct order (low-order bits first, since looping pixelBits from back to front) */
 							if (loop == pixelBits.size() - 1) {
 								uint8_t index = 0;
-								for (int i = 0; i < 8; i += actualbpp) {
+								for (int i = 0; i < 8; i += actualReadBpp) {
 									pixelBits[index] = (current[0] & (bitAnd << i)) >> i;
 
 									/* Scale up by using left bit replication
 									Begin by left shifting, then repeating most significant bits into the open bits
 									*/
-									pixelBits[index] = pixelBits[index] << (8 - actualbpp);
-									for (int j = 0; j < 8 / actualbpp; j++) {
-										pixelBits[index] |= pixelBits[index] >> actualbpp;
+									if (palette.size() == 0) { /*shouldn't replicate for palette indices (not sure if this should be skipped for other things too or not)*/
+										pixelBits[index] = pixelBits[index] << (8 - actualReadBpp);
+										for (int j = 0; j < 8 / actualReadBpp; j++) {
+											pixelBits[index] |= pixelBits[index] >> actualReadBpp;
+										}
 									}
-
 									index++;
 								}
 							}
@@ -575,15 +595,12 @@ namespace ImageLibrary {
 								temp[i] = current[i + 1];
 								temp[i + 1] = current[i];
 							}
-
-							//for (int i = 0; i < sizeof(Pixel); i++) { //reverse bytes
-								//temp[i] = current[sizeof(Pixel) - i - 1];
-							//}
 							for (int i = 0; i < sizeof(Pixel); i++) { //copy temp to current
 								current[i] = temp[i];
 							}
 						}
 
+						
 						switch (currentFilter) {
 						case PNG_Filter::Filter_None:
 							break;
@@ -645,7 +662,15 @@ namespace ImageLibrary {
 						}
 
 						/* Write pixel to output */
-						target[(currentRow * width) + (currentPixelI - 1)] = *currentPixel;
+						if (palette.size() == 0) {
+							target[(currentRow * width) + (currentPixelI - 1)] = *currentPixel;
+						}
+						else { /*is palette index (resulting color will always be rgb8)*/
+							if (current[0] >= palette.size())
+								throw exception("Invalid palette index!");
+							rgbTarget[(currentRow * width) + (currentPixelI - 1)] = palette[current[0]].colors;
+						}
+						
 
 						/* Set prevRow (upper left), prevPixel */
 						*prevRowView = *prevPixelView;
@@ -799,6 +824,8 @@ namespace ImageLibrary {
 			}
 
 			unsigned short bytesPerPixel = current.format.bitsPerPixel / 8;
+			if (palette.size() > 0)
+				bytesPerPixel = 1; //max palette range is 1-255 so 8 bit depth max
 			switch (bytesPerPixel) {
 			case 1:
 				FilterPass<uint8_t>();
