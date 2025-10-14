@@ -94,7 +94,7 @@ namespace ImageLibrary {
 			uint8_t bit_pointer = 0; //0-7 indexing individual bits
 			bool bytePresent = false; //set if partial byte stored
 
-			State state;
+			State state = State::Init;
 			BlockType type;
 			Generic::huffman::Huffman<MAXBITS, FIXLCODES> staticLengthTable;
 			Generic::huffman::Huffman<MAXBITS, MAXLCODES> dynamicLengthTable;

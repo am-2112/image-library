@@ -402,7 +402,7 @@ namespace ImageLibrary {
 			}
 
 			if (!interlaced) {
-				out->image = vector<uint8_t>(out->dimensions.width * out->dimensions.height * (actualbpp / 8));
+				out->image = vector<uint8_t>(out->dimensions.width * out->dimensions.height * ((actualbpp + 7) / 8));
 			}
 
 			Pixel* target = (Pixel*)out->image.data();
