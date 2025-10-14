@@ -4,7 +4,7 @@ Developing a library to read from / write to a variety of image formats.
 This library will also contain helper classes such as ones to parse zlib streams
 
 ## Available formats:
-*PNG being worked on (107/175 images displaying appropriate results)
+*PNG being worked on (107/175 test images displaying appropriate results)
 
 ## How to Use:
 The generic interface for image encoders/decoders can be found at interface/image-stream-interface.h
